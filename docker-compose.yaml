@@ -1,0 +1,128 @@
+# Vance — local startup stack.
+#
+# Pulls prebuilt images from Docker Hub (mhus/vance-*) and starts a
+# self-contained local environment: MongoDB + Brain + Web UI.
+#
+# Quick start:
+#   cp .env.example .env
+#   # edit .env if you want non-default secrets
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# Optional add-ons via profiles:
+#   docker compose --profile live up -d        # adds Redis (cross-pod live-ws)
+#   docker compose --profile admin up -d       # adds mongo-express on :9081
+#   docker compose --profile tools run --rm anus   # interactive admin shell
+#
+# Override secrets via .env (next to this file) or env vars in the shell:
+#   VANCE_ENCRYPTION_PASSWORD, VANCE_INTERNAL_TOKEN, VANCE_ANUS_PASSWORD_HASH,
+#   MONGO_INITDB_ROOT_USERNAME, MONGO_INITDB_ROOT_PASSWORD.
+
+name: vance
+
+services:
+
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-example}
+      MONGO_INITDB_DATABASE: ${VANCE_MONGODB_DATABASE:-vance}
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      # Exposed on the host for ad-hoc admin (mongosh). Set MONGO_PORT to
+      # an empty string in .env to keep MongoDB strictly on the internal
+      # network.
+      - "${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  brain:
+    image: ${VANCE_IMAGE_NAMESPACE:-mhus}/vance-brain:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      VANCE_MONGODB_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME:-root}:${MONGO_INITDB_ROOT_PASSWORD:-example}@mongodb:27017/${VANCE_MONGODB_DATABASE:-vance}?authSource=admin
+      VANCE_MONGODB_DATABASE: ${VANCE_MONGODB_DATABASE:-vance}
+      VANCE_ENCRYPTION_PASSWORD: ${VANCE_ENCRYPTION_PASSWORD:-changeit}
+      VANCE_INTERNAL_TOKEN: ${VANCE_INTERNAL_TOKEN:-changeit-internal}
+      VANCE_BOOTSTRAP_ACME: ${VANCE_BOOTSTRAP_ACME:-false}
+      VANCE_REDIS_ENABLED: ${VANCE_REDIS_ENABLED:-false}
+      VANCE_REDIS_URI: ${VANCE_REDIS_URI:-redis://redis:6379}
+      JAVA_OPTS: ${BRAIN_JAVA_OPTS:--XX:+UseG1GC -XX:MaxRAMPercentage=75.0}
+    volumes:
+      - brain-data:/app/data
+      - brain-logs:/app/logs
+    ports:
+      # Direct API access from the host; remove to force traffic through face.
+      - "${BRAIN_PORT:-9990}:9990"
+
+  face:
+    image: ${VANCE_IMAGE_NAMESPACE:-mhus}/vance-face:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      brain:
+        condition: service_started
+    ports:
+      - "${FACE_PORT:-8080}:80"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    profiles: ["live"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+
+  mongo-express:
+    image: mongo-express:1.0
+    restart: unless-stopped
+    profiles: ["admin"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME:-root}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-example}
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-admin}
+    ports:
+      - "${MONGO_EXPRESS_PORT:-9081}:8081"
+
+  anus:
+    image: ${VANCE_IMAGE_NAMESPACE:-mhus}/vance-anus:${IMAGE_TAG:-latest}
+    # No restart — anus is interactive and exits when the operator quits.
+    profiles: ["tools"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      VANCE_MONGODB_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME:-root}:${MONGO_INITDB_ROOT_PASSWORD:-example}@mongodb:27017/${VANCE_MONGODB_DATABASE:-vance}?authSource=admin
+      VANCE_MONGODB_DATABASE: ${VANCE_MONGODB_DATABASE:-vance}
+      VANCE_ENCRYPTION_PASSWORD: ${VANCE_ENCRYPTION_PASSWORD:-changeit}
+      VANCE_ANUS_PASSWORD_HASH: ${VANCE_ANUS_PASSWORD_HASH:-}
+      VANCE_ANUS_TIMEOUT: ${VANCE_ANUS_TIMEOUT:-10m}
+    volumes:
+      - anus-data:/app/data
+
+volumes:
+  mongo-data:
+  brain-data:
+  brain-logs:
+  redis-data:
+  anus-data:
