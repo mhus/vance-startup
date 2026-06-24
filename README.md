@@ -49,6 +49,28 @@ The wizard writes everything to MongoDB and exits. Re-run it later to add
 another tenant or user; existing entries are not overwritten unless you
 explicitly change them.
 
+### Choosing a model
+
+Vance is an agentic system — the model spends a lot of tokens reasoning,
+calling tools and writing back. Models that look fine in a chat UI can
+collapse under that load. Rough current picture (mid-2026):
+
+| Model | Verdict |
+|---|---|
+| **GLM-5.2** | **Top recommendation.** Strong tool-use, long context, no licensing friction for agentic workloads. |
+| **DeepSeek V4** | Strong choice. Comparable quality to GLM-5.2, very competitive pricing. |
+| **Gemini 2.5 Pro / Flash** | Solid. Flash is good for the fast-tier alias, Pro for analyze/deep. Wizard preset. |
+| **OpenAI GPT-4o / o-series** | Solid. Wizard preset. |
+| **Anthropic Claude** | Wizard preset, **but read Anthropic's Usage Policy and Commercial Terms first** — they impose restrictions on autonomous-agent use cases that some Vance workflows fall under. Not recommended for unattended production agents unless you've confirmed your use case is covered. |
+| **Gemma 4** | The realistic minimum. Works, but expect occasional tool-call failures and weaker long-context reasoning. Use only if you have a hard self-hosting requirement. |
+| **Qwen 3.5** | **Not recommended.** Inconsistent tool-call behaviour and instruction-following under Vance's load patterns. |
+
+The wizard ships presets for **Gemini, OpenAI and Anthropic**. For
+**GLM-5.2, DeepSeek and self-hosted models** (Gemma via Ollama etc.),
+finish the wizard with any provider, then switch the active provider in
+the Web UI under Settings → AI, or pre-seed it with
+`confidential/init-settings.yaml` (see source repo).
+
 To stop:
 
 ```bash
