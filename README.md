@@ -5,6 +5,9 @@ Compose stack that pulls prebuilt images from Docker Hub and brings up
 MongoDB, the Brain (server) and the Web UI, plus an interactive
 one-shot setup wizard for the first tenant + user + LLM provider.
 
+> [!WARNING]
+> **Beta.** Vance is in active development. APIs, data model, configuration keys and engine behaviour can change between releases. Suitable for hands-on experimentation and early adopters; not yet hardened for unattended production use. Pin `IMAGE_TAG` in `.env` to a specific release before depending on a stack.
+
 ## Requirements
 
 - Docker 24+ with Compose v2 (i.e. `docker compose`, not `docker-compose`)
