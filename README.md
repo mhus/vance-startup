@@ -1,8 +1,9 @@
 # vance-startup
 
 The fastest way to run [Vance](https://vance.mhus.de) locally — a Docker
-Compose stack that pulls prebuilt images from Docker Hub and starts
-MongoDB, the Brain (server) and the Web UI in one command.
+Compose stack that pulls prebuilt images from Docker Hub and brings up
+MongoDB, the Brain (server) and the Web UI, plus an interactive
+one-shot setup wizard for the first tenant + user + LLM provider.
 
 ## Requirements
 
@@ -23,11 +24,30 @@ cp .env.example .env
 #   VANCE_INTERNAL_TOKEN
 # before any non-local use.
 
+# 1. Start the stack (MongoDB + Brain + Web UI).
 docker compose up -d
+
+# 2. First-time setup: create a tenant + user and configure an LLM provider.
+#    This is an interactive one-shot wizard — answer the prompts, then it exits.
+docker compose run --rm anus --setup
 ```
 
-Then open <http://localhost:8080> in your browser. The Web UI is the
-landing page; configure your LLM providers there after login.
+Then open <http://localhost:8080> in your browser and log in with the user
+you just created in step 2.
+
+### What the setup wizard asks for
+
+Have these ready before running `--setup`:
+
+- **Tenant name + title** — e.g. `acme` / `Acme Inc.`
+- **First user** — login, display name, email, password
+- **LLM provider** — Gemini, OpenAI or Anthropic
+- **API key** for the chosen provider
+- **Optional: Serper API key** for web research
+
+The wizard writes everything to MongoDB and exits. Re-run it later to add
+another tenant or user; existing entries are not overwritten unless you
+explicitly change them.
 
 To stop:
 
@@ -74,15 +94,19 @@ docker compose --profile admin up -d
 
 ### Anus admin shell (profile: `tools`)
 
-Interactive Vance admin CLI. Requires a BCrypt password hash in
+Interactive Vance admin CLI for ongoing operations (tenant management,
+user management, settings inspection). Requires a BCrypt password hash in
 `VANCE_ANUS_PASSWORD_HASH`.
 
 ```bash
 # Generate the hash once (replace 'mypassword'):
-docker compose --profile tools run --rm anus hash --plain mypassword
+docker compose run --rm anus hash --plain mypassword
 # Paste the output into .env as VANCE_ANUS_PASSWORD_HASH, then:
-docker compose --profile tools run --rm anus
+docker compose run --rm anus
 ```
+
+For the first-time setup wizard (no password required), use
+`docker compose run --rm anus --setup` — see [Quick start](#quick-start).
 
 ## Configuration
 
