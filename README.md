@@ -59,7 +59,7 @@ collapse under that load. Rough current picture (mid-2026):
 |---|---|
 | **GLM-5.2** | **Top recommendation.** Strong tool-use, long context, no licensing friction for agentic workloads. |
 | **DeepSeek V4** | Strong choice. Comparable quality to GLM-5.2, very competitive pricing. |
-| **Gemini 2.5 Pro / Flash** | Solid. Flash is good for the fast-tier alias, Pro for analyze/deep. Wizard preset. |
+| **Gemini 3.x Pro / Flash** | Solid. Flash is good for the fast-tier alias, Pro for analyze/deep. Wizard preset. **Stick to 3.x — 2.5 is shaky under agentic load.** |
 | **OpenAI GPT-4o / o-series** | Solid. Wizard preset. |
 | **Anthropic Claude** | Wizard preset, **but read Anthropic's Usage Policy and Commercial Terms first** — they impose restrictions on autonomous-agent use cases that some Vance workflows fall under. Not recommended for unattended production agents unless you've confirmed your use case is covered. |
 | **Gemma 4** | The realistic minimum. Works, but expect occasional tool-call failures and weaker long-context reasoning. Use only if you have a hard self-hosting requirement. |
