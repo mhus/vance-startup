@@ -1,0 +1,71 @@
+# Vance — minimal local stack (Mongo + Brain + Web UI, nothing else).
+#
+# Recommended for local installs. Pulls prebuilt images from Docker Hub
+# (mhus/vance-*) and starts the three services you need to use Vance.
+#
+# Quick start:
+#   cp .env.example .env
+#   # edit .env if you want non-default secrets
+#   docker compose up -d
+#   ./setup.sh                       # first-time tenant + user + LLM wizard
+#   open http://localhost:8080
+#
+# If you want Vance's live features (cross-pod live-WS, presence,
+# documents.changed push), or the admin tools (mongo-express, the anus
+# REPL), use the ../live/ variant instead.
+
+name: vance
+
+services:
+
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-example}
+      MONGO_INITDB_DATABASE: ${VANCE_MONGODB_DATABASE:-vance}
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  brain:
+    image: ${VANCE_IMAGE_NAMESPACE:-mhus}/vance-brain:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      VANCE_MONGODB_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME:-root}:${MONGO_INITDB_ROOT_PASSWORD:-example}@mongodb:27017/${VANCE_MONGODB_DATABASE:-vance}?authSource=admin
+      VANCE_MONGODB_DATABASE: ${VANCE_MONGODB_DATABASE:-vance}
+      VANCE_ENCRYPTION_PASSWORD: ${VANCE_ENCRYPTION_PASSWORD:-changeit}
+      VANCE_INTERNAL_TOKEN: ${VANCE_INTERNAL_TOKEN:-changeit-internal}
+      VANCE_BOOTSTRAP_ACME: ${VANCE_BOOTSTRAP_ACME:-false}
+      JAVA_OPTS: ${BRAIN_JAVA_OPTS:--XX:+UseG1GC -XX:MaxRAMPercentage=75.0}
+    volumes:
+      - brain-data:/app/data
+      - brain-logs:/app/logs
+    ports:
+      - "${BRAIN_PORT:-9990}:9990"
+
+  face:
+    image: ${VANCE_IMAGE_NAMESPACE:-mhus}/vance-face:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      brain:
+        condition: service_started
+    ports:
+      - "${FACE_PORT:-8080}:80"
+
+volumes:
+  mongo-data:
+  brain-data:
+  brain-logs:

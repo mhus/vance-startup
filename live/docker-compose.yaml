@@ -1,22 +1,23 @@
-# Vance — local startup stack.
+# Vance — local stack with live features (Redis enabled).
 #
-# Pulls prebuilt images from Docker Hub (mhus/vance-*) and starts a
-# self-contained local environment: MongoDB + Brain + Web UI.
+# Same as ../minimal/ plus a Redis container, with the Brain configured
+# to use it. Use this variant if you want the live-WS features
+# (cross-pod fan-out, presence, documents.changed push) — even on a
+# single-pod local install Redis exercises the same code paths your
+# multi-pod deployment will hit.
 #
 # Quick start:
 #   cp .env.example .env
 #   # edit .env if you want non-default secrets
 #   docker compose up -d
+#   docker compose run --rm anus --setup
 #   open http://localhost:8080
 #
-# Optional add-ons via profiles:
-#   docker compose --profile live up -d        # adds Redis (cross-pod live-ws)
-#   docker compose --profile admin up -d       # adds mongo-express on :9081
+# Optional add-ons via Compose profiles:
+#   docker compose --profile admin up -d           # adds mongo-express on :9081
 #   docker compose --profile tools run --rm anus   # interactive admin shell
 #
-# Override secrets via .env (next to this file) or env vars in the shell:
-#   VANCE_ENCRYPTION_PASSWORD, VANCE_INTERNAL_TOKEN, VANCE_ANUS_PASSWORD_HASH,
-#   MONGO_INITDB_ROOT_USERNAME, MONGO_INITDB_ROOT_PASSWORD.
+# If you don't need live features, use the simpler ../minimal/ variant.
 
 name: vance
 
@@ -32,9 +33,6 @@ services:
     volumes:
       - mongo-data:/data/db
     ports:
-      # Exposed on the host for ad-hoc admin (mongosh). Set MONGO_PORT to
-      # an empty string in .env to keep MongoDB strictly on the internal
-      # network.
       - "${MONGO_PORT:-27017}:27017"
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
@@ -43,11 +41,28 @@ services:
       retries: 10
       start_period: 20s
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
   brain:
     image: ${VANCE_IMAGE_NAMESPACE:-mhus}/vance-brain:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       mongodb:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: prod
@@ -56,14 +71,13 @@ services:
       VANCE_ENCRYPTION_PASSWORD: ${VANCE_ENCRYPTION_PASSWORD:-changeit}
       VANCE_INTERNAL_TOKEN: ${VANCE_INTERNAL_TOKEN:-changeit-internal}
       VANCE_BOOTSTRAP_ACME: ${VANCE_BOOTSTRAP_ACME:-false}
-      VANCE_REDIS_ENABLED: ${VANCE_REDIS_ENABLED:-false}
+      VANCE_REDIS_ENABLED: "true"
       VANCE_REDIS_URI: ${VANCE_REDIS_URI:-redis://redis:6379}
       JAVA_OPTS: ${BRAIN_JAVA_OPTS:--XX:+UseG1GC -XX:MaxRAMPercentage=75.0}
     volumes:
       - brain-data:/app/data
       - brain-logs:/app/logs
     ports:
-      # Direct API access from the host; remove to force traffic through face.
       - "${BRAIN_PORT:-9990}:9990"
 
   face:
@@ -74,16 +88,6 @@ services:
         condition: service_started
     ports:
       - "${FACE_PORT:-8080}:80"
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    profiles: ["live"]
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis-data:/data
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
 
   mongo-express:
     image: mongo-express:1.0
@@ -103,7 +107,6 @@ services:
 
   anus:
     image: ${VANCE_IMAGE_NAMESPACE:-mhus}/vance-anus:${IMAGE_TAG:-latest}
-    # No restart — anus is interactive and exits when the operator quits.
     profiles: ["tools"]
     depends_on:
       mongodb:

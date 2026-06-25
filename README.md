@@ -1,25 +1,38 @@
 # vance-startup
 
-The fastest way to run [Vance](https://vance.mhus.de) locally — a Docker
-Compose stack that pulls prebuilt images from Docker Hub and brings up
+The fastest way to run [Vance](https://vance.mhus.de) locally — Docker
+Compose stacks that pull prebuilt images from Docker Hub and bring up
 MongoDB, the Brain (server) and the Web UI, plus an interactive
 one-shot setup wizard for the first tenant + user + LLM provider.
 
 > [!WARNING]
 > **Beta.** Vance is in active development. APIs, data model, configuration keys and engine behaviour can change between releases. Suitable for hands-on experimentation and early adopters; not yet hardened for unattended production use. Pin `IMAGE_TAG` in `.env` to a specific release before depending on a stack.
 
+## Two variants
+
+Pick the subdirectory that matches what you want to run. Each is a
+self-contained Docker Compose stack.
+
+| Variant | What's in it | When to pick |
+|---|---|---|
+| [`minimal/`](minimal/) | MongoDB + Brain + Web UI. Setup wizard runs as a one-shot via `./setup.sh`. | **Default for local installs.** Smallest possible footprint. Live-WS cross-pod features are off — single-pod doesn't need them. |
+| [`live/`](live/) | The above + Redis (live features) + mongo-express (debug) + Anus REPL (admin). | Pick this if you want to exercise the live features (multi-tab presence, `documents.changed` push, cross-pod fan-out) or want the debug / admin tooling on tap. |
+
+The workflow below applies to both; just `cd` into the variant you
+chose.
+
 ## Requirements
 
-- Docker 24+ with Compose v2 (i.e. `docker compose`, not `docker-compose`)
-- ~2 GB free RAM
-- Outbound HTTPS to Docker Hub (for image pulls) and to your LLM provider
+- Docker 24+ with Compose v2 (`docker compose`, not `docker-compose`)
+- ~2 GB RAM for `minimal/`, ~2.5 GB for `live/`
+- Outbound HTTPS to Docker Hub (image pulls) and to your LLM provider
   (Anthropic, OpenAI, Gemini, …)
 
 ## Quick start
 
 ```bash
 git clone https://github.com/mhus/vance-startup.git
-cd vance-startup
+cd vance-startup/minimal      # or: cd vance-startup/live
 cp .env.example .env
 
 # IMPORTANT: edit .env and change at least
@@ -27,20 +40,22 @@ cp .env.example .env
 #   VANCE_INTERNAL_TOKEN
 # before any non-local use.
 
-# 1. Start the stack (MongoDB + Brain + Web UI).
+# 1. Start the stack.
 docker compose up -d
 
 # 2. First-time setup: create a tenant + user and configure an LLM provider.
-#    This is an interactive one-shot wizard — answer the prompts, then it exits.
+#    Interactive one-shot wizard — answer the prompts, then it exits.
+./setup.sh                    # minimal/
+# OR (in the live/ variant, where anus ships as a compose service):
 docker compose run --rm anus --setup
 ```
 
-Then open <http://localhost:8080> in your browser and log in with the user
-you just created in step 2.
+Then open <http://localhost:8080> in your browser and log in with the
+user you just created in step 2.
 
 ### What the setup wizard asks for
 
-Have these ready before running `--setup`:
+Have these ready before running the wizard:
 
 - **Tenant name + title** — e.g. `acme` / `Acme Inc.`
 - **First user** — login, display name, email, password
@@ -48,9 +63,9 @@ Have these ready before running `--setup`:
 - **API key** for the chosen provider
 - **Optional: Serper API key** for web research
 
-The wizard writes everything to MongoDB and exits. Re-run it later to add
-another tenant or user; existing entries are not overwritten unless you
-explicitly change them.
+The wizard writes everything to MongoDB and exits. Re-run it later to
+add another tenant or user; existing entries are not overwritten
+unless you explicitly change them.
 
 ### Choosing a model
 
@@ -70,8 +85,8 @@ collapse under that load. Rough current picture (mid-2026):
 
 The wizard ships presets for **Gemini, OpenAI and Anthropic**. For
 **GLM-5.2, DeepSeek and self-hosted models** (Gemma via Ollama etc.),
-finish the wizard with any provider, then switch the active provider in
-the Web UI under Settings → AI, or pre-seed it with
+finish the wizard with any provider, then switch the active provider
+in the Web UI under Settings → AI, or pre-seed it with
 `confidential/init-settings.yaml` (see source repo).
 
 To stop:
@@ -83,30 +98,27 @@ docker compose down -v         # also delete MongoDB volume — full reset
 
 ## What this starts
 
-| Service | Image | Port | Role |
-|---|---|---|---|
-| `mongodb` | `mongo:7.0` | 27017 | Persistence — think-processes, documents, settings |
-| `brain` | `mhus/vance-brain` | 9990 | Vance Brain server (REST + WebSocket) |
-| `face` | `mhus/vance-face` | 8080 | Web UI |
+| Service | Image | Port | `minimal/` | `live/` |
+|---|---|---|---|---|
+| `mongodb` | `mongo:7.0` | 27017 | ✓ | ✓ |
+| `brain` | `mhus/vance-brain` | 9990 | ✓ | ✓ |
+| `face` | `mhus/vance-face` | 8080 | ✓ | ✓ |
+| `redis` | `redis:7-alpine` | 6379 | — | ✓ |
+| `mongo-express` (profile: `admin`) | `mongo-express:1.0` | 9081 | — | opt-in |
+| `anus` (profile: `tools`) | `mhus/vance-anus` | — | — | opt-in |
 
-Data is kept in named Docker volumes (`vance_mongo-data`, `vance_brain-data`,
-`vance_brain-logs`).
+In `minimal/`, the setup wizard runs via `./setup.sh` which spawns
+`vance-anus` as a one-shot `docker run` against the existing compose
+network — anus is not kept as a permanent service.
 
-## Optional add-ons
+Data is kept in named Docker volumes (`vance_mongo-data`,
+`vance_brain-data`, `vance_brain-logs`; `vance_redis-data` in `live/`).
 
-The compose file ships three additional services, gated by Compose
+## live/ — opt-in profiles
+
+The `live/` variant defines two extra services gated by Compose
 [profiles](https://docs.docker.com/compose/profiles/) so they don't run
-unless you ask for them.
-
-### Redis (profile: `live`)
-
-Required for multi-pod deployments that need cross-instance live-WS
-fan-out. Not needed for a single-pod local stack.
-
-```bash
-docker compose --profile live up -d
-# also set VANCE_REDIS_ENABLED=true in .env
-```
+unless you ask.
 
 ### mongo-express (profile: `admin`)
 
@@ -120,8 +132,8 @@ docker compose --profile admin up -d
 ### Anus admin shell (profile: `tools`)
 
 Interactive Vance admin CLI for ongoing operations (tenant management,
-user management, settings inspection). Requires a BCrypt password hash in
-`VANCE_ANUS_PASSWORD_HASH`.
+user management, settings inspection). Requires a BCrypt password hash
+in `VANCE_ANUS_PASSWORD_HASH`.
 
 ```bash
 # Generate the hash once (replace 'mypassword'):
@@ -131,13 +143,14 @@ docker compose run --rm anus
 ```
 
 For the first-time setup wizard (no password required), use
-`docker compose run --rm anus --setup` — see [Quick start](#quick-start).
+`docker compose run --rm anus --setup` (or the `./setup.sh` wrapper
+in `minimal/`) — see [Quick start](#quick-start).
 
 ## Configuration
 
-All knobs live in `.env`. The defaults are safe for `localhost` only —
-**change passwords before exposing the stack to a network**. The most
-important ones:
+All knobs live in the variant's `.env`. Defaults are safe for `localhost`
+only — **change passwords before exposing the stack to a network**.
+The most important ones:
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -145,6 +158,22 @@ important ones:
 | `VANCE_INTERNAL_TOKEN` | `changeit-internal` | Shared secret for cross-pod internal calls. |
 | `MONGO_INITDB_ROOT_PASSWORD` | `example` | MongoDB root password. |
 | `IMAGE_TAG` | `latest` | Pin to a specific Vance release tag for reproducible deploys. |
+
+## Switching variants
+
+If you've started with `minimal/` and want to try `live/` later:
+
+```bash
+cd ../minimal
+docker compose down              # stop the minimal stack (keeps volumes)
+cd ../live
+cp ../minimal/.env .env          # carry your secrets over
+docker compose up -d             # MongoDB volume is shared (same `name: vance`)
+```
+
+Both variants use the same Compose project name (`vance`), so MongoDB
+data persists across the switch. Only Redis state is variant-specific
+(and is fine to recreate — ephemeral by design).
 
 ## Upgrading
 
@@ -157,13 +186,21 @@ If you've pinned `IMAGE_TAG`, bump it in `.env` first.
 
 ## Troubleshooting
 
-- **Brain restarts on boot:** check `docker compose logs brain` — usually a
-  MongoDB connection issue (wrong credentials in `.env`) or a port clash on
-  9990.
+- **Brain restarts on boot:** check `docker compose logs brain` — usually
+  a MongoDB connection issue (wrong credentials in `.env`) or a port
+  clash on 9990.
 - **Web UI loads but shows a connection error:** the Web UI talks to the
-  Brain via the browser, not container-to-container. Make sure `BRAIN_PORT`
-  is reachable from your host.
+  Brain via the browser, not container-to-container. Make sure
+  `BRAIN_PORT` is reachable from your host.
 - **Port already in use:** override the affected `*_PORT` in `.env`.
+- **`./setup.sh` complains the network doesn't exist:** run
+  `docker compose up -d` first so the `vance_default` network is
+  created.
+- **Live variant boots without Redis pings:** `docker compose logs brain`
+  should show `Redis connection established at redis://redis:6379` near
+  the start; if it doesn't, the brain fell back to in-memory and live
+  features won't fan out. Check `VANCE_REDIS_URI` and that Redis is
+  healthy.
 
 ## Documentation
 
